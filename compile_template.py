@@ -13,13 +13,25 @@ import logging
 from pathlib import Path
 import torch
 from constants import *
-from release.tecod_utils import *
+from tecod_utils import (
+    convert_sql_string_to_template,
+    convert_template_to_ebnf,
+    ebnf_to_regex,
+    decode_token_ids,
+    get_token_offsets,
+    get_covering_token_ids,
+    get_sub_sqls,
+)
+import sqlglot
+from sqlglot import TokenType
 import outlines
 import pickle
 from tqdm import tqdm
+import re
+import json
 
 
-def generate_token_ids_and_save_to_store(model, template_id, tokenizer, prompt, sql_query, db_id, dataset_name, ebnf_type, token_healing=True, token_healing_right=False):
+def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, prompt, sql_query, db_id=None, dataset_name=None, db_path=None, ebnf_type, token_healing=True, token_healing_right=False):
     """
     Generate token IDs for the given SQL query in teacher forcing manner and save them to the specified output path.
     """
@@ -43,12 +55,14 @@ def generate_token_ids_and_save_to_store(model, template_id, tokenizer, prompt, 
     sql_template = convert_sql_string_to_template(sql_string=sql_query,
                                    db_name=db_id,
                                    dataset_name=dataset_name,
+                                   db_path=db_path,
                                    mask_literals=False,) # mask_literals=False is used to generate the template for teacher forcing setup, for normal gcd use mask_literals=True
 
     sql_ebnf, new_rules_for_ebnf = convert_template_to_ebnf(template=sql_template,
                                         remove_aliases=False,
                                         db_id=db_id,
                                         dataset=dataset_name,
+                                        db_path=db_path,
                                         type=ebnf_type) # tab_and_col_to_rule_grammar, base_grammar
     
     # logging.info(f"SQL EBNF: {sql_ebnf}")

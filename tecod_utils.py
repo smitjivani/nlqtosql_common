@@ -11,23 +11,27 @@ os.environ['HF_HOME'] = os.getenv("HF_CACHE")
 import sqlglot
 from sqlglot import parse_one, exp
 from sqlglot.expressions import Select, Table, Column, Alias, CTE, Subquery
-from sqlglot import parse_one, exp
 from sqlglot.tokens import Token, TokenType
 import copy
 from constants import *
 import json
+from pathlib import Path
 import re
 import torch
 
 
 
-def get_tables_and_columns_from_db(db_name: str, dataset='bird') -> tuple:
+def get_tables_and_columns_from_db(db_name: str = None, dataset='bird', db_path: str = None) -> tuple:
     """
     Get the tables and columns from the database connection.
     Args:
     ----
-    db_conn: str
-        Database connection path
+    db_name: str
+        Database name
+    dataset: str
+        Dataset type ('bird' or 'spider')
+    db_path: str
+        Direct path to database file. If provided, takes precedence over dataset-based path construction.
 
     Returns:
     ----
@@ -40,10 +44,14 @@ def get_tables_and_columns_from_db(db_name: str, dataset='bird') -> tuple:
 
     """
     import sqlite3
-    if dataset == 'bird':
-        db_path = os.path.join(os.getenv("BIRD_DEV_PATH"), "dev", "dev_databases", db_name, f'{db_name}.sqlite')
-    elif dataset == 'spider':
-        db_path = os.path.join(os.getenv("SPIDER_DEV_PATH"), "database", db_name, f'{db_name}.sqlite')
+
+    assert db_path is not None or (db_name is not None and dataset is not None), "Either db_path must be provided or both db_name and dataset must be provided"
+
+    if db_path is None:
+        if dataset == 'bird':
+            db_path = os.path.join(os.getenv("BIRD_DEV_PATH"), "dev", "dev_databases", db_name, f'{db_name}.sqlite')
+        elif dataset == 'spider':
+            db_path = os.path.join(os.getenv("SPIDER_DEV_PATH"), "database", db_name, f'{db_name}.sqlite')
     
     db_conn = sqlite3.connect(db_path)
 
@@ -142,13 +150,13 @@ def extract_sqlite_aliases(query: str) -> dict:
     return aliases
 
 
-def convert_sql_string_to_template(sql_string, db_name, dataset_name, mask_literals=True) -> str:
+def convert_sql_string_to_template(sql_string, db_name, dataset_name, mask_literals=True, db_path=None) -> str:
     """
     use sqlglot transform to replace string literals with "string_rule" and number_literals with "number_rule"
     """
     tree = parse_one(sql_string, read="sqlite")
 
-    tables, columns, _, _ = get_tables_and_columns_from_db(db_name=db_name, dataset=dataset_name)
+    tables, columns, _, _ = get_tables_and_columns_from_db(db_name=db_name, dataset=dataset_name, db_path=db_path)
     aliases_dict = extract_sqlite_aliases(sql_string)
     aliases_names = list(aliases_dict.keys())
 
@@ -213,7 +221,7 @@ def remove_aliases_from_sql(sql):
     return parsed_query.sql(dialect='sqlite')
 
 
-def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset=None, type=None) -> str:
+def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset=None, type=None, db_path=None) -> str:
     """
     Generates an EBNF string from an SQL query.
     Args:
@@ -223,6 +231,25 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
 
     remove_aliases: bool
         If True, removes aliases from the query
+
+    db_id: str
+        Database ID to fetch tables and columns from
+
+    dataset: str
+        Dataset name to fetch tables and columns from
+
+    type: str
+        Type of grammar to generate (add support for different grammars here if required). Options are:
+        - 'base_grammar'
+        - 'tab_and_col_to_rule_grammar'
+        - 'common_table_and_column_rule_grammar'
+
+    db_path: str
+        Direct path to database file. If provided, takes precedence over dataset-based path construction.
+
+    Returns:
+    masked_query: str
+        EBNF string
 
     db_id: str
         Database ID to fetch tables and columns from
@@ -251,11 +278,12 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
     """
     # remove alias from the query
     # query_ = None
-    assert db_id is not None, "Database ID must be provided"
-    assert dataset is not None, "Dataset must be provided"
+
+    assert db_path is not None or (db_id is not None and dataset is not None), "Either db_path must be provided or both db_id and dataset must be provided"
     assert type in ['base_grammar', 
                     'tab_and_col_to_rule_grammar',
                     'common_table_and_column_rule_grammar'], "Grammar must be as mentioned in the docstring"
+
     query = template.strip()
     if remove_aliases:
         query = remove_aliases_from_sql(query)
@@ -269,7 +297,7 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
 
     elif type == 'tab_and_col_to_rule_grammar':
         aliases_dict = extract_sqlite_aliases(query)
-        tables, columns, tab_set, col_set = get_tables_and_columns_from_db(db_name=db_id, dataset=dataset)
+        tables, columns, tab_set, col_set = get_tables_and_columns_from_db(db_name=db_id, dataset=dataset, db_path=db_path)
 
         # find tables and columns present in query
         tables_present = []
@@ -430,7 +458,10 @@ def ebnf_to_regex(ebnf_str, full_sql=True, new_rules_for_ebnf=None):
         regex_grammar = "WS?{select_stmt}(WS?|SEMICOLON?)".format(select_stmt=ebnf_str)
     else:
         regex_grammar = ebnf_str
-    regex_rules = json.loads(open(GRAMMAR_TEMPLATE_JSON_PATH, "r").read())
+    if Path('complete_sql_template.json').exists():
+        regex_rules = json.loads(open('complete_sql_template.json', "r").read())
+    else:
+        regex_rules = json.loads(open(GRAMMAR_TEMPLATE_JSON_PATH, "r").read())
     if new_rules_for_ebnf is not None:
         for key, value in new_rules_for_ebnf.items():
             if key not in regex_rules:

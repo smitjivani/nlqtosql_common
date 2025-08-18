@@ -10,17 +10,15 @@ os.environ['HF_HOME'] = os.getenv("HF_CACHE")
 
 import pickle
 import logging
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from constants import *
 from utils.common_utils import *
 # from time import process_time
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from pathlib import Path
 import torch
 import json
-from release.tecod_utils import *
+from tecod_utils import remove_trailing_kv_cache, remove_trailing_eos_tensor, truncate_kv_cache
 import contextlib
-from tqdm import tqdm
 
 
 method_output_path_map = {
