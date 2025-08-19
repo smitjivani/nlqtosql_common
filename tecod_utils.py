@@ -3,17 +3,17 @@ import sys
 from dotenv import load_dotenv
 
 # Load the .env file
-load_dotenv()
+# load_dotenv()
 
-sys.path.insert(1, os.getenv("PROJECT_ROOT"))
-os.environ['HF_HOME'] = os.getenv("HF_CACHE")
+# sys.path.insert(1, os.getenv("PROJECT_ROOT"))
+# os.environ['HF_HOME'] = os.getenv("HF_CACHE")
 
 import sqlglot
 from sqlglot import parse_one, exp
 from sqlglot.expressions import Select, Table, Column, Alias, CTE, Subquery
 from sqlglot.tokens import Token, TokenType
 import copy
-from constants import *
+from .constants import *
 import json
 from pathlib import Path
 import re
@@ -656,3 +656,4 @@ def decode_token_ids(tokenizer, model_output, inputs):
     output_token_ids = token_ids[0].tolist()[inputs['input_ids'].shape[1]:end_index] # -1 for the eos token at the end
     
     return tokenizer.decode(output_token_ids, skip_special_tokens=True), output_token_ids
+

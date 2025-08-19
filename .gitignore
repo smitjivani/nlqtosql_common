@@ -1,0 +1,8 @@
+.env
+
+**/__pycache__/
+
+*.log
+*.err
+*.pkl
+*.pickle
