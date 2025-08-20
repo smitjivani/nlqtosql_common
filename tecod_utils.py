@@ -150,7 +150,7 @@ def extract_sqlite_aliases(query: str) -> dict:
     return aliases
 
 
-def convert_sql_string_to_template(sql_string, db_name, dataset_name, mask_literals=True, db_path=None) -> str:
+def convert_sql_string_to_template(sql_string, db_name=None, dataset_name=None, mask_literals=True, db_path=None) -> str:
     """
     use sqlglot transform to replace string literals with "string_rule" and number_literals with "number_rule"
     """
@@ -221,7 +221,7 @@ def remove_aliases_from_sql(sql):
     return parsed_query.sql(dialect='sqlite')
 
 
-def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset=None, type=None, db_path=None) -> str:
+def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset=None, type=None, db_path=None) -> tuple[str, dict]:
     """
     Generates an EBNF string from an SQL query.
     Args:
@@ -270,7 +270,7 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
     Example:
     --------
     >>> convert_template_to_ebnf("SELECT * FROM table WHERE column = 123", db_id="california_schools", dataset="bird", type="base_grammar")
-    'select ws "*" ws from ws "table" ws where ws "column" ws "=" ws sql_number_rule'
+    'select ws "*" ws from ws "table" ws where ws "column" ws "=" ws number_rule'
 
     Author:
     --------
@@ -332,7 +332,21 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
                 if node.table:
                     if node.table in aliases_dict.keys():
                         return exp.Column(this=exp.to_identifier(rule), table=exp.to_identifier(alias_to_rule_name[node.table]))
-                    return exp.Column(this=exp.to_identifier(rule), table=exp.to_identifier(table_to_rule_name[node.table]))
+                    #####
+                    # if alias, then just add new entry, special case: partial expression 
+                    try:
+                        return exp.Column(this=exp.to_identifier(rule), table=exp.to_identifier(table_to_rule_name[node.table]))
+                    except KeyError:
+                        rule_name = f"alias_rule_{len(aliases_dict)}"
+                        a = add_back_ticks(node.table)
+                        values = f"{a.lower()}|{a.upper()}|{a.title()}"
+                        new_rules_for_ebnf[rule_name] = values
+                        alias_to_rule_name[a] = rule_name
+                        try:
+                            return exp.Column(this=exp.to_identifier(rule), table=exp.to_identifier(alias_to_rule_name[add_back_ticks(node.table)]))
+                        except KeyError as e:
+                            raise e
+                    #####
                 return exp.Column(this=exp.to_identifier(rule))
 
             if isinstance(node, exp.Alias) and node.alias.lower() == value.lower().strip('`'):
@@ -449,7 +463,7 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
     return join_tokens(query_tokens), new_rules_for_ebnf
 
 
-def ebnf_to_regex(ebnf_str, full_sql=True, new_rules_for_ebnf=None):
+def ebnf_to_regex(ebnf_str, full_sql=True, new_rules_for_ebnf=None, **kwargs):
     # DOUBLE_QUOTE_REGEX = "|\"([^\"\\\\]|\\\\.)*\""
     # EXTENDED_WS = '[ \u000B\t\r\n]'
     # # EXTENDED_WS_PLUS = '[ \u000B\t\r\n]+'
@@ -458,10 +472,14 @@ def ebnf_to_regex(ebnf_str, full_sql=True, new_rules_for_ebnf=None):
         regex_grammar = "WS?{select_stmt}(WS?|SEMICOLON?)".format(select_stmt=ebnf_str)
     else:
         regex_grammar = ebnf_str
-    if Path('complete_sql_template.json').exists():
+    
+    if 'regex_rules' in kwargs:
+        regex_rules = kwargs['regex_rules']
+    elif Path('complete_sql_template.json').exists():
         regex_rules = json.loads(open('complete_sql_template.json', "r").read())
     else:
         regex_rules = json.loads(open(GRAMMAR_TEMPLATE_JSON_PATH, "r").read())
+    
     if new_rules_for_ebnf is not None:
         for key, value in new_rules_for_ebnf.items():
             if key not in regex_rules:
@@ -483,7 +501,7 @@ def ebnf_to_regex(ebnf_str, full_sql=True, new_rules_for_ebnf=None):
         for key in sorted_keys:
             match = re.match(re.escape(key), remaining)
             if match:
-                if key not in ["DOUBLEQUOTE", "SINGLEQUOTE", "string_rule", "sql_number_rule", "WS","SEMICOLON"]:
+                if key not in ["DOUBLEQUOTE", "SINGLEQUOTE", "string_rule", "number_rule", "WS","SEMICOLON", "projections", "conditions"]:
                     result += "(" + "|".join([re.escape(i) for i in regex_rules[key].split("|")]) + ")"
                 else:
                     result += "(" + regex_rules[key] + ")"
