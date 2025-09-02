@@ -477,6 +477,8 @@ def ebnf_to_regex(ebnf_str, full_sql=True, new_rules_for_ebnf=None, **kwargs):
         regex_rules = kwargs['regex_rules']
     elif Path('complete_sql_template.json').exists():
         regex_rules = json.loads(open('complete_sql_template.json', "r").read())
+    elif (Path(os.environ['ROOT_DIR']) / 'src/pdec/complete_sql_template.json').exists():
+        regex_rules = json.loads(open(Path(os.environ['ROOT_DIR']) / 'src/pdec/complete_sql_template.json', "r").read())
     else:
         regex_rules = json.loads(open(GRAMMAR_TEMPLATE_JSON_PATH, "r").read())
     

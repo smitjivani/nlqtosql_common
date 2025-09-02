@@ -3,21 +3,21 @@ import sys
 from dotenv import load_dotenv
 
 # Load the .env file
-load_dotenv()
-sys.path.insert(1, os.getenv("PROJECT_ROOT"))
-os.environ['HF_HOME'] = os.getenv("HF_CACHE")
+# load_dotenv()
+# sys.path.insert(1, os.getenv("PROJECT_ROOT"))
+# os.environ['HF_HOME'] = os.getenv("HF_CACHE")
 # os.environ['CURL_CA_BUNDLE'] = ''
 
 import pickle
 import logging
-from constants import *
-from utils.common_utils import *
+from .constants import *
+# from utils.common_utils import *
 # from time import process_time
 from tqdm.auto import tqdm
 from pathlib import Path
 import torch
 import json
-from tecod_utils import remove_trailing_kv_cache, remove_trailing_eos_tensor, truncate_kv_cache
+from .tecod_utils import remove_trailing_kv_cache, remove_trailing_eos_tensor, truncate_kv_cache
 import contextlib
 
 
@@ -66,7 +66,7 @@ def partitioned_decoding(model, tokenizer, prompt, template_id, template, device
     prompt_token_count = llm_input.shape[1]
 
     for idx, lit in enumerate(sql_literal_types):
-        processor = logit_processors[idx]
+        processor = logit_processors[idx].copy()
 
         if past_key_values is not None:
             model_kwargs["past_key_values"] = past_key_values

@@ -3,17 +3,17 @@ import sys
 from dotenv import load_dotenv
 
 # Load the .env file
-load_dotenv()
+# load_dotenv()
 
-sys.path.insert(1, os.getenv("PROJECT_ROOT"))
-os.environ['HF_HOME'] = os.getenv("HF_CACHE")
+# sys.path.insert(1, os.getenv("PROJECT_ROOT"))
+# os.environ['HF_HOME'] = os.getenv("HF_CACHE")
 
 
 import logging
 from pathlib import Path
 import torch
-from constants import *
-from tecod_utils import (
+from .constants import *
+from .tecod_utils import (
     convert_sql_string_to_template,
     convert_template_to_ebnf,
     ebnf_to_regex,
@@ -39,7 +39,7 @@ def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, promp
 
     if "system\n" in prompt and "user\n" in prompt:
         text = prompt
-    else:
+    elif tokenizer.chat_template and tokenizer.chat_template != "":
         message = [{'role': 'user', 'content': prompt}]
 
         text = tokenizer.apply_chat_template(
@@ -47,7 +47,10 @@ def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, promp
             tokenize=False,
             add_generation_prompt=True
         )
-        
+    else:
+        logging.warning("No chat template found, using prompt as text.")
+        text = prompt
+
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
 
     # prepare template
@@ -93,7 +96,7 @@ def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, promp
 
     generated_sql, generated_token_ids = decode_token_ids(tokenizer, model_output, model_inputs)
 
-    sql_number_rule = ebnf_to_regex("sql_number_rule", full_sql=False)
+    number_rule = ebnf_to_regex("number_rule", full_sql=False)
     string_rule = ebnf_to_regex("string_rule", full_sql=False)
 
     # identifying sql partitions around literals
@@ -121,6 +124,7 @@ def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, promp
     compiled_template = {
         template_id: {
             'input_ids': input_ids,
+            'sql_ebnf': sql_ebnf,
             'sql_literal_types': sql_literal_types,
             'logit_processors': []
         }
@@ -140,7 +144,7 @@ def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, promp
                 if len(input_ids[idx+1]) > 0:
                     next_token_id = input_ids[idx+1].pop(0) #rhs token healing
 
-            regex = f"""{re.escape(literal_extra_texts[idx][0])}{sql_number_rule}{re.escape(literal_extra_texts[idx][1])}"""
+            regex = f"""{re.escape(literal_extra_texts[idx][0])}{number_rule}{re.escape(literal_extra_texts[idx][1])}"""
 
             regex = f"""{re.escape(tokenizer.decode(prev_token_id)) if prev_token_id != "" else ""}{regex}{re.escape(tokenizer.decode(next_token_id)) if next_token_id != "" else ""}"""
             
