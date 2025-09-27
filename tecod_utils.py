@@ -37,6 +37,8 @@ def get_tables_and_columns_from_db(db_name: str = None, dataset='bird', db_path:
     ----
     tables: list
         List of table names in the database
+    columns_names: list
+        List of column names in the database
     tab_set_lower: dict
         Dictionary of table names in lower case
     col_set_lower: dict
@@ -55,8 +57,6 @@ def get_tables_and_columns_from_db(db_name: str = None, dataset='bird', db_path:
     
     db_conn = sqlite3.connect(db_path)
 
-    # global tables, tab_set_lower, col_set_lower
-
     if db_conn is None:
         raise ValueError("Database connection is None")
 
@@ -64,9 +64,6 @@ def get_tables_and_columns_from_db(db_name: str = None, dataset='bird', db_path:
     tables = db_conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     tables = [table[0] for table in tables]
     columns_names = []
-
-    # add backticks if needed to the table names
-    # tables = [add_back_ticks(table) for table in tables]
 
     # Get the columns for each table
     tab_set = {}
@@ -110,7 +107,7 @@ def extract_sqlite_aliases(query: str) -> dict:
         # Column aliases
         if isinstance(node, Alias):
             try:
-                aliases[node.alias] = {
+                aliases[node.alias.lower()] = {
                     'value': node.this.sql(dialect='sqlite'),
                     'type': 'column'
                 }
@@ -120,7 +117,7 @@ def extract_sqlite_aliases(query: str) -> dict:
         # Table aliases
         elif isinstance(node, Table) and hasattr(node, 'alias') and node.alias:
             try:
-                aliases[node.alias] = {
+                aliases[node.alias.lower()] = {
                     'value': node.name,
                     'type': 'table'
                 }
@@ -130,7 +127,7 @@ def extract_sqlite_aliases(query: str) -> dict:
         # Subquery aliases
         elif isinstance(node, Subquery) and hasattr(node, 'alias') and node.alias:
             try:
-                aliases[node.alias] = {
+                aliases[node.alias.lower()] = {
                     'value': f"({node.this.sql(dialect='sqlite')})",
                     'type': 'subquery'
                 }
@@ -140,7 +137,7 @@ def extract_sqlite_aliases(query: str) -> dict:
         # CTE aliases
         elif isinstance(node, CTE):
             try:
-                aliases[node.alias] = {
+                aliases[node.alias.lower()] = {
                     'value': node.this.sql(dialect='sqlite'),
                     'type': 'cte'
                 }
@@ -160,9 +157,14 @@ def convert_sql_string_to_template(sql_string, db_name=None, dataset_name=None, 
     aliases_dict = extract_sqlite_aliases(sql_string)
     aliases_names = list(aliases_dict.keys())
 
+    # get unique table and column, alias names in lower case
+    tables = list(set([t.lower() for t in tables]))
+    columns = list(set([c.lower() for c in columns]))
+    aliases_names = list(set([a.lower() for a in aliases_names]))
+
     def transform_tree(node, tables, columns, aliases):
         if isinstance(node, exp.Identifier):
-            if node.name not in tables and node.name not in columns and node.name not in aliases:
+            if node.name.lower() not in tables and node.name.lower() not in columns and node.name.lower() not in aliases:
                 return exp.Literal.string("string_rule")
         if isinstance(node, exp.Literal):
             if node.is_string:
@@ -205,20 +207,38 @@ def remove_aliases_from_sql(sql):
 
     def substitute_alias(node, aliases):
         if isinstance(node, exp.Column): # handle T1.column
-            if node.table in list(aliases.keys()):
-                if aliases[node.table]['type'] == 'table':
-                    node.set('table', aliases[node.table]['value'])
+            if node.table.lower() in list(aliases.keys()):
+                if aliases[node.table.lower()]['type'] == 'table':
+                    node.set('table', aliases[node.table.lower()]['value'])
 
         if isinstance(node, exp.Identifier):
-            if node.name in list(aliases.keys()):
-                if aliases[node.name]['type'] in ['column', 'table']:
-                    node.set('this', aliases[node.name]['value'])
+            if node.name.lower() in list(aliases.keys()):
+                if aliases[node.name.lower()]['type'] in ['column', 'table']:
+                    node.set('this', aliases[node.name.lower()]['value'])
 
         return node
 
     parsed_query = parsed_query.transform(lambda node: substitute_alias(node, aliases_dict))
 
     return parsed_query.sql(dialect='sqlite')
+
+def add_back_ticks(identifier):
+    if " " in identifier:
+        return f"`{identifier}`"
+    if identifier in SQL_KEYWORDS:
+        return f"`{identifier}`"
+    if "-" in identifier:
+        return f"`{identifier}`"
+    return identifier
+
+def add_double_quotes(identifier):
+    if " " in identifier:
+        return f'"{identifier}"'
+    if identifier in SQL_KEYWORDS:
+        return f'"{identifier}"'
+    if "-" in identifier:
+        return f'"{identifier}"'
+    return identifier
 
 
 def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset=None, type=None, db_path=None) -> tuple[str, dict]:
@@ -251,22 +271,6 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
     masked_query: str
         EBNF string
 
-    db_id: str
-        Database ID to fetch tables and columns from
-
-    dataset: str
-        Dataset name to fetch tables and columns from
-
-    type: str
-        Type of grammar to generate (add support for different grammars here if required). Options are:
-        - 'base_grammar'
-        - 'tab_and_col_to_rule_grammar'
-        - 'common_table_and_column_rule_grammar'
-
-    Returns:
-    masked_query: str
-        EBNF string
-
     Example:
     --------
     >>> convert_template_to_ebnf("SELECT * FROM table WHERE column = 123", db_id="california_schools", dataset="bird", type="base_grammar")
@@ -290,14 +294,13 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
 
     new_rules_for_ebnf = {}
     rules_in_template = ["number_rule", "string_rule"]
-    add_back_ticks = lambda x: f"`{x}`" if " " in x else x
 
     if type == 'base_grammar':
         pass
 
     elif type == 'tab_and_col_to_rule_grammar':
         aliases_dict = extract_sqlite_aliases(query)
-        tables, columns, tab_set, col_set = get_tables_and_columns_from_db(db_name=db_id, dataset=dataset, db_path=db_path)
+        tables, columns, _, _  = get_tables_and_columns_from_db(db_name=db_id, dataset=dataset)
 
         # find tables and columns present in query
         tables_present = []
@@ -330,58 +333,50 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
             
             if isinstance(node, exp.Column) and node.name.lower() == value.lower().strip('`'):
                 if node.table:
-                    if node.table in aliases_dict.keys():
-                        return exp.Column(this=exp.to_identifier(rule), table=exp.to_identifier(alias_to_rule_name[node.table]))
-                    #####
-                    # if alias, then just add new entry, special case: partial expression 
-                    try:
-                        return exp.Column(this=exp.to_identifier(rule), table=exp.to_identifier(table_to_rule_name[node.table]))
-                    except KeyError:
-                        rule_name = f"alias_rule_{len(aliases_dict)}"
-                        a = add_back_ticks(node.table)
-                        values = f"{a.lower()}|{a.upper()}|{a.title()}"
-                        new_rules_for_ebnf[rule_name] = values
-                        alias_to_rule_name[a] = rule_name
-                        try:
-                            return exp.Column(this=exp.to_identifier(rule), table=exp.to_identifier(alias_to_rule_name[add_back_ticks(node.table)]))
-                        except KeyError as e:
-                            raise e
-                    #####
+                    if node.table.lower() in aliases_dict.keys():
+                        return exp.Column(this=exp.to_identifier(rule), table=exp.to_identifier(alias_to_rule_name[node.table.lower()]))
+                    return exp.Column(this=exp.to_identifier(rule), table=exp.to_identifier(table_to_rule_name[node.table.lower()]))
                 return exp.Column(this=exp.to_identifier(rule))
 
             if isinstance(node, exp.Alias) and node.alias.lower() == value.lower().strip('`'):
-                return exp.Alias(this=node.this, alias=exp.to_identifier(alias_to_rule_name[value]))
+                return exp.Alias(this=node.this, alias=exp.to_identifier(alias_to_rule_name[value.lower()]))
 
             return node
 
         # create new rules for alias separately to generate alias_to_rule_name mapping before any transformations
         for idx, a in enumerate(aliases_dict): 
             rule_name = f"alias_rule_{idx}"
-            a = add_back_ticks(a)
-            values = f"{a.lower()}|{a.upper()}|{a.title()}"
+            a_ticks = add_back_ticks(a)
+            a_dquotes = add_double_quotes(a)
+            # a_squotes = add_single_quotes(a)
+            values = f"{a_ticks.lower()}|{a_ticks.upper()}|{a_ticks.title()}|{a_dquotes.lower()}|{a_dquotes.upper()}|{a_dquotes.title()}"
             new_rules_for_ebnf[rule_name] = values
-            alias_to_rule_name[a] = rule_name
+            alias_to_rule_name[a.lower()] = rule_name
 
         for idx, t in enumerate(tables_present):
             rule_name = f"table_rule_{idx}"
-            t = add_back_ticks(t)
-            values = f"{t.lower()}|{t.upper()}|{t.title()}"
+            t_ticks = add_back_ticks(t)
+            t_dquotes = add_double_quotes(t)
+            # t_squotes = add_single_quotes(t)
+            values = f"{t_ticks.lower()}|{t_ticks.upper()}|{t_ticks.title()}|{t_dquotes.lower()}|{t_dquotes.upper()}|{t_dquotes.title()}"
             new_rules_for_ebnf[rule_name] = values
-            table_to_rule_name[t] = rule_name
+            table_to_rule_name[t.lower()] = rule_name
 
         # create new rules for tables, columns and aliases
         for idx, t in enumerate(tables_present):
             # remove table name from the query using parsed_query
-            parsed_query = parsed_query.transform(lambda node: transform(node, t, table_to_rule_name[t], aliases_dict, alias_to_rule_name, table_to_rule_name))
+            parsed_query = parsed_query.transform(lambda node: transform(node, t, table_to_rule_name[t.lower()], aliases_dict, alias_to_rule_name, table_to_rule_name))
 
         for idx, a in enumerate(aliases_dict): 
-            rule_name = alias_to_rule_name[a]
+            rule_name = alias_to_rule_name[a.lower()]
             parsed_query = parsed_query.transform(lambda node: transform(node, a, rule_name, aliases_dict, alias_to_rule_name, table_to_rule_name))
 
         for idx, c in enumerate(columns_present):
             rule_name = f"column_rule_{idx}"
-            c = add_back_ticks(c)
-            values = f"{c.lower()}|{c.upper()}|{c.title()}"
+            c_ticks = add_back_ticks(c)
+            c_dquotes = add_double_quotes(c)
+            # c_squotes = add_single_quotes(c)
+            values = f"{c_ticks.lower()}|{c_ticks.upper()}|{c_ticks.title()}|{c_dquotes.lower()}|{c_dquotes.upper()}|{c_dquotes.title()}"
             new_rules_for_ebnf[rule_name] = values
             parsed_query = parsed_query.transform(lambda node: transform(node, c, rule_name, aliases_dict, alias_to_rule_name, table_to_rule_name))
 
@@ -392,16 +387,13 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
     # Tokenize the SQL query
     expression = sqlglot.tokenize(query, read="sqlite")
     literal_quote = '\\"'
-    optional_ws = " ws? "
+    # optional_ws = " ws? "
 
     def templatise_node(node):
         templatised_node = copy.deepcopy(node)
         
         if node.text in rules_in_template:
             return templatised_node
-        # if mask_literals:
-        #     if node.text in new_rules:
-        #         return templatised_node
         
         if node.token_type in [TokenType.STRING, TokenType.NUMBER]:
                 if query[node.start] in ["'", '"', "`"]:
@@ -450,11 +442,6 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
                 collected_tokens.append(tok.text)
                 if idx < len(tokens) - 1:
                     collected_tokens.append("WS?")
-                    # not sure why this is needed, but if some error cases are found consider uncommenting this
-                    # if tok.text.strip("\"") == ")":
-                    #     collected_tokens.append("WS")
-                    # else:
-                    #     collected_tokens.append("WS?")
             else:
                 collected_tokens.append(tok.text)
                 if idx < len(tokens) - 1:
@@ -464,10 +451,6 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
 
 
 def ebnf_to_regex(ebnf_str, full_sql=True, new_rules_for_ebnf=None, **kwargs):
-    # DOUBLE_QUOTE_REGEX = "|\"([^\"\\\\]|\\\\.)*\""
-    # EXTENDED_WS = '[ \u000B\t\r\n]'
-    # # EXTENDED_WS_PLUS = '[ \u000B\t\r\n]+'
-    # EXTENDED_WS_PLUS = '\\s|\\s\\s'
     if full_sql:
         regex_grammar = "WS?{select_stmt}(WS?|SEMICOLON?)".format(select_stmt=ebnf_str)
     else:
@@ -487,7 +470,6 @@ def ebnf_to_regex(ebnf_str, full_sql=True, new_rules_for_ebnf=None, **kwargs):
             if key not in regex_rules:
                 regex_rules[key] = value
 
-    
     double_quoted_substrings = re.findall(r'(?<!\\)"(.*?)(?<!\\)"', regex_grammar)
     for dq in double_quoted_substrings:
         dq_ = dq.replace("\\\"", "\"")
@@ -497,24 +479,28 @@ def ebnf_to_regex(ebnf_str, full_sql=True, new_rules_for_ebnf=None, **kwargs):
     # Initialize the result string
     result = ""
     remaining = regex_grammar
-    
+
     while remaining:
         replaced = False
         for key in sorted_keys:
             match = re.match(re.escape(key), remaining)
             if match:
-                if key not in ["DOUBLEQUOTE", "SINGLEQUOTE", "string_rule", "number_rule", "WS","SEMICOLON", "projections", "conditions"]:
-                    result += "(" + "|".join([re.escape(i) for i in regex_rules[key].split("|")]) + ")"
+                if key not in ["DOUBLEQUOTE", "SINGLEQUOTE", "string_rule", "number_rule", "WS","SEMICOLON"]:
+                    replacement = "(" + "|".join([re.escape(i) for i in regex_rules[key].split("|")]) + ")"
                 else:
-                    result += "(" + regex_rules[key] + ")"
+                    replacement = "(" + regex_rules[key] + ")"
+                
+                result += replacement
                 remaining = remaining[match.end():]
                 replaced = True
                 break
         if not replaced:
             result += remaining[0]
             remaining = remaining[1:]
+            
+    final_regex = result.replace(f" ({regex_rules["WS"]}) ", "(" + regex_rules["WS"] + ")").replace(f" ({regex_rules["WS"]})? ", "(" + regex_rules["WS"] + ")?")
 
-    return result.replace(f" ({regex_rules["WS"]}) ", "(" + regex_rules["WS"] + ")").replace(f" ({regex_rules["WS"]})? ", "(" + regex_rules["WS"] + ")?")
+    return final_regex
 
 
 def remove_trailing_kv_cache(past_key_values, model_type, t=-1):
@@ -522,17 +508,12 @@ def remove_trailing_kv_cache(past_key_values, model_type, t=-1):
     Truncate past key-values to remove the last token.
     This is necessary when generating sequences token-by-token and # entries in kv_cache = # entries in input_ids
     """
-    # if "Llama" in model_type or "Granite" in model_type:
-        # Llama: [num_layers][2][batch, num_heads, seq, head_dim]
     return past_key_values.crop(max_length=t)
         
     
 def truncate_kv_cache(past_key_values, new_seq_len, model_type):
     """Fast KV cache truncation"""
-    # if "Llama" in model_type or "Granite" in model_type:
-        # Llama: List[num_hidden_layers-32][2][batch_size, kv heads, seq_len, 128]
-        # Dynamic cache: [num_hidden_layers][2(for key and values)][batch_size, num_heads, seq_len, head_dim]
-        # Avoid list comprehension for speed
+    # Dynamic cache: [num_hidden_layers][2(for key and values)][batch_size, num_heads, seq_len, head_dim]
     past_key_values.crop(max_length=new_seq_len)
     return past_key_values
         
@@ -676,4 +657,3 @@ def decode_token_ids(tokenizer, model_output, inputs):
     output_token_ids = token_ids[0].tolist()[inputs['input_ids'].shape[1]:end_index] # -1 for the eos token at the end
     
     return tokenizer.decode(output_token_ids, skip_special_tokens=True), output_token_ids
-

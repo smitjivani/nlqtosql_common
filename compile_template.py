@@ -37,19 +37,7 @@ def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, promp
     """
     # logging.info(f"Generating token IDs for template: {template_id}")
 
-    if "system\n" in prompt and "user\n" in prompt:
-        text = prompt
-    elif tokenizer.chat_template and tokenizer.chat_template != "":
-        message = [{'role': 'user', 'content': prompt}]
-
-        text = tokenizer.apply_chat_template(
-            message,
-            tokenize=False,
-            add_generation_prompt=True
-        )
-    else:
-        logging.warning("No chat template found, using prompt as text.")
-        text = prompt
+    text = prompt # prompt with/without chat_template should be handled before passing here
 
     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
 
@@ -68,7 +56,6 @@ def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, promp
                                         db_path=db_path,
                                         type=ebnf_type) # tab_and_col_to_rule_grammar, base_grammar
     
-    # logging.info(f"SQL EBNF: {sql_ebnf}")
 
     sql_regex_grammar = ebnf_to_regex(ebnf_str=sql_ebnf, new_rules_for_ebnf=new_rules_for_ebnf)
 
@@ -80,19 +67,12 @@ def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, promp
                                 outlines_tokenizer,)]
     
     model_output = model.generate(**model_inputs, 
-                                        max_new_tokens=512,
+                                        max_new_tokens=650,
                                         pad_token_id=tokenizer.eos_token_id, 
                                         logits_processor=grammar_processor,
                                         return_dict_in_generate=True,
                                         do_sample=False,
                                         )
-
-    # if "sequences" in model_output.keys():
-    #     output_token_ids = model_output.sequences
-    # else:
-    #     output_token_ids = model_output
-
-    # output_token_ids = output_token_ids[0].tolist()[model_inputs['input_ids'].shape[1]:]
 
     generated_sql, generated_token_ids = decode_token_ids(tokenizer, model_output, model_inputs)
 
