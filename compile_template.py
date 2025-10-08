@@ -64,7 +64,8 @@ def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, promp
 
     grammar_processor = [outlines.processors.RegexLogitsProcessor(
                                 sql_regex_grammar,
-                                outlines_tokenizer,)]
+                                outlines_tokenizer,
+                                'torch')]
     
     model_output = model.generate(**model_inputs, 
                                         max_new_tokens=650,
@@ -149,6 +150,7 @@ def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, promp
         processor = outlines.processors.RegexLogitsProcessor(
                         regex,
                         outlines_tokenizer,
+                        'torch'
                     )
         
         compiled_template[template_id]['logit_processors'].append(processor)
