@@ -1,24 +1,21 @@
+import copy
+import json
 import os
-import sys
-# from dotenv import load_dotenv
+import re
+from pathlib import Path
 
+# from dotenv import load_dotenv
 # Load the .env file
 # load_dotenv()
-
 # sys.path.insert(1, os.getenv("PROJECT_ROOT"))
 # os.environ['HF_HOME'] = os.getenv("HF_CACHE")
-
 import sqlglot
-from sqlglot import parse_one, exp
-from sqlglot.expressions import Select, Table, Column, Alias, CTE, Subquery
-from sqlglot.tokens import Token, TokenType
-import copy
-from .constants import *
-import json
-from pathlib import Path
-import re
 import torch
+from sqlglot import exp, parse_one
+from sqlglot.expressions import CTE, Alias, Subquery, Table
+from sqlglot.tokens import TokenType
 
+from .constants import *
 
 
 def get_tables_and_columns_from_db(db_name: str = None, dataset='bird', db_path: str = None) -> tuple:

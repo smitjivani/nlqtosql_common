@@ -1,23 +1,23 @@
+import json
+import logging
 import os
-import sys
-from dotenv import load_dotenv
 
 # Load the .env file
 # load_dotenv()
 # sys.path.insert(1, os.getenv("PROJECT_ROOT"))
 # os.environ['HF_HOME'] = os.getenv("HF_CACHE")
 # os.environ['CURL_CA_BUNDLE'] = ''
-
 import pickle
-import logging
-from .constants import *
+from pathlib import Path
+
+import torch
+
 # from utils.common_utils import *
 # from time import process_time
 from tqdm.auto import tqdm
-from pathlib import Path
-import torch
-import json
-from .tecod_utils import remove_trailing_kv_cache, remove_trailing_eos_tensor, truncate_kv_cache
+
+from .constants import *
+from .tecod_utils import remove_trailing_eos_tensor, remove_trailing_kv_cache, truncate_kv_cache
 
 
 def partitioned_decoding(model, tokenizer, prompt, template_id, template, device):
@@ -85,7 +85,7 @@ def partitioned_decoding(model, tokenizer, prompt, template_id, template, device
 def main():
     model_name = XIYAN_SQL_QWENCODER_7B
     device = 'cuda:2' if torch.cuda.is_available() else 'cpu'
-    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_name, clean_up_tokenization_spaces=False, padding_side="left", token=os.getenv("HF_ACCESS_TOKEN"), local_files_only=False)
     model = AutoModelForCausalLM.from_pretrained(model_name, token=os.getenv("HF_ACCESS_TOKEN"), local_files_only=False, device_map={"": f"{device}"})
     dataset_name = 'bird'

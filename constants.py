@@ -99,12 +99,14 @@ SYMBOLS_TO_RULES_MAP = {
 
 # get todays date in format DDMMYYYY
 import datetime
+
 TODAYS_DATE = datetime.datetime.now().strftime("%d%m%Y")
 TIMENOW = datetime.datetime.now().strftime("%H%M%S")
 
 
 #LLM constants and paths
 from pathlib import Path
+
 BIRD_TECOD_PROMPTS_PATH = "data/bird/dev/tecod/"
 SPIDER_TECOD_PROMPTS_PATH = "data/spider/tecod/"
 

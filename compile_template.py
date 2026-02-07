@@ -1,34 +1,31 @@
-import os
-import sys
-from dotenv import load_dotenv
+import json
 
 # Load the .env file
 # load_dotenv()
-
 # sys.path.insert(1, os.getenv("PROJECT_ROOT"))
 # os.environ['HF_HOME'] = os.getenv("HF_CACHE")
-
-
 import logging
+import os
+import pickle
+import re
 from pathlib import Path
+
+import outlines
+import sqlglot
 import torch
+from sqlglot import TokenType
+from tqdm import tqdm
+
 from .constants import *
 from .tecod_utils import (
     convert_sql_string_to_template,
     convert_template_to_ebnf,
-    ebnf_to_regex,
     decode_token_ids,
-    get_token_offsets,
+    ebnf_to_regex,
     get_covering_token_ids,
     get_sub_sqls,
+    get_token_offsets,
 )
-import sqlglot
-from sqlglot import TokenType
-import outlines
-import pickle
-from tqdm import tqdm
-import re
-import json
 
 
 def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, prompt, sql_query, db_id=None, dataset_name=None, db_path=None, ebnf_type, token_healing=True, token_healing_right=False):
@@ -161,7 +158,7 @@ def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, promp
 def main():
     model_name = XIYAN_SQL_QWENCODER_7B
     device = 'cuda:4' if torch.cuda.is_available() else 'cpu'
-    from transformers import AutoTokenizer, AutoModelForCausalLM
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_name, clean_up_tokenization_spaces=False, padding_side="left", token=os.getenv("HF_ACCESS_TOKEN"), local_files_only=False)
     model = AutoModelForCausalLM.from_pretrained(model_name, token=os.getenv("HF_ACCESS_TOKEN"), local_files_only=False, device_map={"": f"{device}"})
 
