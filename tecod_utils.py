@@ -612,15 +612,23 @@ def get_token_offsets(tokenizer, token_ids: torch.Tensor) -> list[tuple[int, int
     # non-special entries of token_ids. Downstream consumers rely on
     # that invariant; silently shortening the list produces alignment
     # drift that surfaces far from the cause.
+    # Size each orphan by its own *individual* decode width rather than
+    # sharing one wide span — an early reviewer rightly pointed out
+    # that a shared span covering the whole merged decode causes
+    # downstream ``get_covering_token_ids`` to consume too many tokens
+    # when a literal lands inside the orphan tail.
     if collected_tokens:
-        synthetic_span = (current_pos, current_pos + len(last_token_text))
-        for _ in collected_tokens:
-            offsets.append(synthetic_span)
+        orphan_pos = current_pos
+        for tid in collected_tokens:
+            individual = tokenizer.decode([tid], skip_special_tokens=True)
+            end = orphan_pos + len(individual)
+            offsets.append((orphan_pos, end))
+            orphan_pos = end
         logger.debug(
             "get_token_offsets: %d trailing tokens could not be located in decoded text; "
-            "appended synthetic span %s",
+            "appended per-token synthetic spans starting at %d",
             len(collected_tokens),
-            synthetic_span,
+            current_pos,
         )
 
     return offsets
@@ -628,15 +636,25 @@ def get_token_offsets(tokenizer, token_ids: torch.Tensor) -> list[tuple[int, int
 def get_covering_token_ids(tokenizer, token_ids: list, literal_span: tuple, decoded_tokens_with_spans: list) -> tuple[int, int]:
     """
     Find the token ID sequence that completely covers a given literal span.
-    
+
     Args:
         tokenizer: HuggingFace tokenizer
         token_ids: List of token IDs
         literal_span: Tuple of (start, end) character positions for the literal
         decoded_tokens_with_spans: List of (token_text, (start, end)) tuples for each token
-        
+
     Returns:
         Tuple of (start_token_idx, end_token_idx) that covers the literal
+
+    Assumption: ``decoded_tokens_with_spans`` comes from
+    ``get_token_offsets``, which elides HuggingFace special-token IDs
+    from its output. Callers must therefore pass ``token_ids`` that
+    contains **no mid-sequence special tokens**; otherwise the ``idx``
+    from the span scan would not line up with ``token_ids[idx]``.
+    ``compile_template.generate_token_ids_and_save_to_store`` satisfies
+    this today because ``decode_token_ids`` only strips the prompt and
+    an optional trailing EOS. If a future caller needs to pass tokens
+    that include specials, filter them out *before* calling this.
     """
     literal_start, literal_end = literal_span
     start_token_idx = None
