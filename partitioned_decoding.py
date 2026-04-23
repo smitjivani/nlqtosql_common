@@ -28,6 +28,13 @@ def partitioned_decoding(model, tokenizer, prompt, template_id, template, device
     logit_processors = template['logit_processors']
     assert len(sql_literal_types) == len(logit_processors), "Mismatch between sql_literal_types and logit_processors length"
     input_ids = template['input_ids']
+    # input_ids has one entry per literal slot plus one trailing entry for
+    # the tail of the template after the last literal. Fail fast here so
+    # a corrupted template doesn't surface as a bare IndexError mid-loop.
+    assert len(input_ids) == len(sql_literal_types) + 1, (
+        f"input_ids must have len(sql_literal_types) + 1 entries "
+        f"(got {len(input_ids)} vs {len(sql_literal_types)} + 1)"
+    )
     model_kwargs = {}
 
     past_key_values = None

@@ -303,11 +303,11 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
         tables_present = []
         columns_present = []
 
-        for idx,c in enumerate(columns):
+        for c in columns:
             if c.lower().strip('`') in query.lower():
                 columns_present.append(c)
-            
-        for idx, t in enumerate(tables):
+
+        for t in tables:
             if t.lower().strip('`') in query.lower():
                 tables_present.append(t)
 
@@ -360,11 +360,11 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
             table_to_rule_name[t.lower()] = rule_name
 
         # create new rules for tables, columns and aliases
-        for idx, t in enumerate(tables_present):
+        for t in tables_present:
             # remove table name from the query using parsed_query
             parsed_query = parsed_query.transform(lambda node: transform(node, t, table_to_rule_name[t.lower()], aliases_dict, alias_to_rule_name, table_to_rule_name))
 
-        for idx, a in enumerate(aliases_dict): 
+        for a in aliases_dict:
             rule_name = alias_to_rule_name[a.lower()]
             parsed_query = parsed_query.transform(lambda node: transform(node, a, rule_name, aliases_dict, alias_to_rule_name, table_to_rule_name))
 
@@ -447,20 +447,30 @@ def convert_template_to_ebnf(template, remove_aliases=False, db_id=None, dataset
     return join_tokens(query_tokens), new_rules_for_ebnf
 
 
+_DEFAULT_RULES_PATH = Path(__file__).parent / 'complete_sql_template.json'
+
+
 def ebnf_to_regex(ebnf_str, full_sql=True, new_rules_for_ebnf=None, **kwargs):
     if full_sql:
         regex_grammar = "WS?{select_stmt}(WS?|SEMICOLON?)".format(select_stmt=ebnf_str)
     else:
         regex_grammar = ebnf_str
-    
+
     if 'regex_rules' in kwargs:
         regex_rules = kwargs['regex_rules']
-    elif Path('complete_sql_template.json').exists():
-        regex_rules = json.loads(open('complete_sql_template.json', "r").read())
-    elif (Path(os.environ['ROOT_DIR']) / 'src/pdec/complete_sql_template.json').exists():
-        regex_rules = json.loads(open(Path(os.environ['ROOT_DIR']) / 'src/pdec/complete_sql_template.json', "r").read())
     else:
-        regex_rules = json.loads(open(GRAMMAR_TEMPLATE_JSON_PATH, "r").read())
+        # Resolve from the module's own directory first — this works
+        # regardless of CWD, so running from scripts/benchmark.py or a
+        # notebook no longer silently picks up the wrong file. Fall back
+        # to ROOT_DIR (when set) and finally to the hard-coded path.
+        rules_path = _DEFAULT_RULES_PATH
+        if not rules_path.exists() and os.environ.get('ROOT_DIR'):
+            candidate = Path(os.environ['ROOT_DIR']) / 'src/pdec/complete_sql_template.json'
+            if candidate.exists():
+                rules_path = candidate
+        if not rules_path.exists():
+            rules_path = Path(GRAMMAR_TEMPLATE_JSON_PATH)
+        regex_rules = json.loads(rules_path.read_text())
     
     if new_rules_for_ebnf is not None:
         for key, value in new_rules_for_ebnf.items():
@@ -504,7 +514,14 @@ def remove_trailing_kv_cache(past_key_values, model_type, t=-1):
     """
     Truncate past key-values to remove the last token.
     This is necessary when generating sequences token-by-token and # entries in kv_cache = # entries in input_ids
+
+    Idempotent on ``None`` — the first iteration of
+    ``partitioned_decoding`` has no KV cache yet, and its empty-input
+    branch still routes through this helper; returning ``None`` lets
+    the caller assign the result back without a special-case check.
     """
+    if past_key_values is None:
+        return None
     return past_key_values.crop(max_length=t)
         
     
@@ -615,10 +632,10 @@ def get_covering_token_ids(tokenizer, token_ids: list, literal_span: tuple, deco
     if literal_text not in covered_text:
         raise ValueError(f"Token sequence does not completely cover literal: '{literal_text}' not in '{covered_text}'")
     
-    # find text outside of literal_text in covered_text for regex 
-    start_idx = covered_text.find(literal_text) # find text present in covered_text but not in literal_text before start of literal_text
-    end_idx = covered_text.find(literal_text) + len(literal_text) # find text present in covered_text but not in literal_text after end of literal_text   
-    
+    # find text outside of literal_text in covered_text for regex
+    start_idx = covered_text.find(literal_text)
+    end_idx = start_idx + len(literal_text)
+
     before_text = covered_text[:start_idx] if start_idx > 0 else ""
     after_text = covered_text[end_idx:] if end_idx < len(covered_text) else ""
         
