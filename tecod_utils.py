@@ -1,8 +1,11 @@
 import copy
 import json
+import logging
 import os
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # from dotenv import load_dotenv
 # Load the .env file
@@ -558,39 +561,68 @@ def get_token_offsets(tokenizer, token_ids: torch.Tensor) -> list[tuple[int, int
     Returns:
         List of tuples containing (start, end) character offsets for each token
     """
-    # Decode tokens to get the full text
+    # Decode tokens to get the full text. ``skip_special_tokens=True`` is
+    # used consistently here and in ``get_covering_token_ids`` so both
+    # functions share one coordinate system; it also matches the
+    # ``skip_special_tokens=True`` call inside ``decode_token_ids`` that
+    # produces the ``generated_sql`` string sqlglot tokenises.
     decoded_text = tokenizer.decode(token_ids, skip_special_tokens=True)
-    offsets = []
+    offsets: list[tuple[int, int]] = []
     current_pos = 0
-    collected_tokens = []
-    
+    collected_tokens: list = []
+    last_token_text = ""
+
     # Decode each token individually to get its text
     for token_id in token_ids:
-        # Skip special tokens
+        # Skip special tokens — they're absent from decoded_text above, so
+        # they must also be absent from the offsets list to keep the
+        # non-special-token-index → span mapping consistent.
         if token_id in tokenizer.all_special_ids:
             continue
 
         collected_tokens.append(token_id)
-            
-        # Get text for current token
+
+        # Get text for current collected prefix
         token_text = tokenizer.decode(collected_tokens, skip_special_tokens=True)
-        
-        # Find token text in decoded string starting from current position
+        last_token_text = token_text
+
+        # Find that text in the decoded string starting from current
+        # position. If it's absent, keep accumulating — a later iteration
+        # may bring in the tokens needed for a BPE merge to match.
         token_start = decoded_text.find(token_text, current_pos)
         if token_start == -1:
-            # Handle case where token can't be found exactly (e.g. due to merged tokens)
-            # token_start = current_pos
-            # collected_tokens.append(token_id)
             continue
-            
+
         token_end = token_start + len(token_text)
-        for _ in range(0, len(collected_tokens)-1):
-            offsets.append((token_end, token_end))
-        offsets.append((token_start, token_end))
+
+        # Every token that got accumulated into this merged match covers
+        # the same decoded character range. Emit a uniform (start, end)
+        # span for each so ``get_covering_token_ids`` can locate any of
+        # them by position (previously the first N−1 were zero-width
+        # dummies at (end, end), which no literal could land inside).
+        span = (token_start, token_end)
+        for _ in collected_tokens:
+            offsets.append(span)
+
         collected_tokens = []
-        
         current_pos = token_end
-        
+
+    # Trailing tokens that never matched — emit a best-effort synthetic
+    # span at current_pos so the returned list stays 1-to-1 with the
+    # non-special entries of token_ids. Downstream consumers rely on
+    # that invariant; silently shortening the list produces alignment
+    # drift that surfaces far from the cause.
+    if collected_tokens:
+        synthetic_span = (current_pos, current_pos + len(last_token_text))
+        for _ in collected_tokens:
+            offsets.append(synthetic_span)
+        logger.debug(
+            "get_token_offsets: %d trailing tokens could not be located in decoded text; "
+            "appended synthetic span %s",
+            len(collected_tokens),
+            synthetic_span,
+        )
+
     return offsets
 
 def get_covering_token_ids(tokenizer, token_ids: list, literal_span: tuple, decoded_tokens_with_spans: list) -> tuple[int, int]:
@@ -609,25 +641,35 @@ def get_covering_token_ids(tokenizer, token_ids: list, literal_span: tuple, deco
     literal_start, literal_end = literal_span
     start_token_idx = None
     end_token_idx = None
-    
-    # Find starting token that contains or is before literal start
+
+    # Find starting token that contains literal_start. First match wins
+    # so a merged-token run (N tokens sharing the same span) resolves to
+    # the earliest entry.
     for idx, (token_start, token_end) in enumerate(decoded_tokens_with_spans):
         if token_start <= literal_start < token_end:
             start_token_idx = idx
             break
-            
-    # Find ending token that contains or is after literal end
+
+    # Find ending token that contains literal_end. We scan forward but
+    # don't break so that on a merged-token run we land on the *last*
+    # entry, giving an exclusive end_token_idx that covers the whole run.
     for idx, (token_start, token_end) in enumerate(decoded_tokens_with_spans):
         if token_start <= literal_end < token_end:
-            end_token_idx = idx + 1  # +1 to make it exclusive end index
-            break
-    
+            end_token_idx = idx + 1
+
     if start_token_idx is None or end_token_idx is None:
         raise ValueError(f"Could not find tokens covering literal span {literal_span}")
-        
-    # Verify the coverage is complete
-    covered_text = tokenizer.decode(token_ids[start_token_idx:end_token_idx])
-    literal_text = tokenizer.decode(token_ids).encode('utf-8')[literal_start:literal_end+1].decode('utf-8')
+
+    # Verify the coverage is complete. Character offsets from sqlglot are
+    # into Python strings, not UTF-8 bytes — slice decoded text directly.
+    # The old code encoded to UTF-8 and sliced with character indices,
+    # which raised UnicodeDecodeError on any non-ASCII content.
+    covered_text = tokenizer.decode(
+        token_ids[start_token_idx:end_token_idx], skip_special_tokens=True
+    )
+    literal_text = tokenizer.decode(token_ids, skip_special_tokens=True)[
+        literal_start : literal_end + 1
+    ]
     
     if literal_text not in covered_text:
         raise ValueError(f"Token sequence does not completely cover literal: '{literal_text}' not in '{covered_text}'")
