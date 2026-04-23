@@ -28,7 +28,7 @@ from .tecod_utils import (
 )
 
 
-def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, prompt, sql_query, db_id=None, dataset_name=None, db_path=None, ebnf_type, token_healing=True, token_healing_right=False):
+def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, prompt, sql_query, db_id=None, dataset_name=None, db_path=None, ebnf_type, token_healing=True, token_healing_right=False, max_new_tokens=COMPILE_TEMPLATE_MAX_NEW_TOKENS):
     """
     Generate token IDs for the given SQL query in teacher forcing manner and save them to the specified output path.
     """
@@ -64,9 +64,9 @@ def generate_token_ids_and_save_to_store(*, model, template_id, tokenizer, promp
                                 outlines_tokenizer,
                                 'torch')]
     
-    model_output = model.generate(**model_inputs, 
-                                        max_new_tokens=650,
-                                        pad_token_id=tokenizer.eos_token_id, 
+    model_output = model.generate(**model_inputs,
+                                        max_new_tokens=max_new_tokens,
+                                        pad_token_id=tokenizer.eos_token_id,
                                         logits_processor=grammar_processor,
                                         return_dict_in_generate=True,
                                         do_sample=False,

@@ -1,5 +1,13 @@
 DUMP_INTERVAL = 10 # Dump interval for saving predictions to disk
 
+# Token budget for regex-constrained generation during template
+# compilation. Must be large enough to cover the longest expected SQL
+# template (including WS rules that expand to multi-token sequences).
+# Expose via the ``max_new_tokens`` kwarg of
+# ``generate_token_ids_and_save_to_store`` so pathological datasets can
+# raise it without editing library code.
+COMPILE_TEMPLATE_MAX_NEW_TOKENS = 650
+
 # Grammar for keywords and identifiers
 GRAMMAR_TEMPLATE_EBNF_PATH = "generate_constrained_sqls/complete_sql_template.ebnf"
 GRAMMAR_TEMPLATE_LARK_PATH = "generate_constrained_sqls/complete_sql_template.lark"
